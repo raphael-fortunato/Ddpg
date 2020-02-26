@@ -11,13 +11,13 @@ import torch
 import torch.nn.functional as F
 
 from CustomTensorBoard import ModifiedTensorBoard
-from OUnoise import OrnsteinUhlenbeckActionNoise, AdaptiveParamNoiseSpec, Distance
+
 from mpi_utils import sync_networks, sync_grads
 
 import time
 from copy import deepcopy
 
-from normalizer import Normalizer
+
 from models import Actor, Critic
 from buffer import ReplayBuffer
 from arguments import GetArgs
@@ -31,7 +31,6 @@ class Agent:
 		self.env= env
 		self.env_params = env_params
 		self.args = args
-		self.param_noise = AdaptiveParamNoiseSpec()
 		
 
 		# networks
@@ -45,7 +44,6 @@ class Agent:
 		# target networks used to predict env actions with
 		self.actor_target = Actor(self.env_params,).double()
 		self.critic_target = Critic(self.env_params).double()
-		self.actor_pertubated = Actor(self.env_params).double()
 
 		self.actor_target.load_state_dict(self.actor.state_dict())
 		self.critic_target.load_state_dict(self.critic.state_dict())
@@ -55,33 +53,50 @@ class Agent:
 			self.critic.cuda()
 			self.actor_target.cuda()
 			self.critic_target.cuda()
-			self.actor_pertubated.cuda()
+
 
 		self.actor_optim = torch.optim.Adam(self.actor.parameters(), lr=0.001)
 		self.critic_optim = torch.optim.Adam(self.critic.parameters(), lr=0.001)
 
 		self.buffer = ReplayBuffer(1_000_000, self.env_params)
-		self.norm = Normalizer(self.env_params, self.args.gamma)
 		if MPI.COMM_WORLD.Get_rank() == 0:
 			self.tensorboard = ModifiedTensorBoard(log_dir = f"logs")
-		self.record_episodes = [int(eps *self.args.n_epochs) for eps in record_episodes]
+		self.record_episodes = [int(eps * self.args.n_epochs) for eps in record_episodes]
 
-	def Action(self, state, noise=False):
+	def ModelsEval(self):
+		self.actor.eval()
+		self.actor_target.eval()
+		self.critic.eval()
+		self.critic_target.eval()
+
+	def ModelsTrain(self):
+		self.actor.train()
+		self.actor_target.train()
+		self.critic.train()
+		self.critic_target.train()
+
+	def GreedyAction(self, state):
+		self.ModelsEval()
 		with torch.no_grad():
-			if torch.cuda.is_available:
-				state = torch.tensor(state, device='cuda')
-			if noise:
-				#action = self.actor_pertubated.forward(state).detach().cpu().numpy()
-				action = self.actor_target.forward(state).detach().cpu().numpy()
-				action += self.args.noise_eps * self.env_params['max_action'] * np.random.randn(*action.shape)
-				action = np.clip(action, -self.env_params['max_action'], self.env_params['max_action'])
-				#random actions
-				random_actions = np.random.uniform(low=-self.env_params['max_action'], high=self.env_params['max_action'], \
-											size=self.env_params['action'])
-				action += np.random.binomial(1, self.args.random_eps, 1)[0] * (random_actions - action)
-				return action
-			else:
-				return self.actor.forward(state).detach().cpu().numpy()
+			state = torch.tensor(state, device='cuda',dtype=torch.double).unsqueeze(dim=0)
+			action = self.actor.forward(state).detach().cpu().numpy().squeeze()
+		self.ModelsTrain()
+		return action
+
+	def NoiseAction(self, state):
+		self.ModelsEval()
+		with torch.no_grad():
+			state = torch.tensor(state, device='cuda',dtype=torch.double).unsqueeze(dim=0)
+			action = self.actor_target.forward(state).detach().cpu().numpy()
+			action += self.args.noise_eps * self.env_params['max_action'] * np.random.randn(*action.shape)
+			action = np.clip(action, -self.env_params['max_action'], self.env_params['max_action'])
+			#random actions
+			random_actions = np.random.uniform(low=-self.env_params['max_action'], high=self.env_params['max_action'], \
+										size=self.env_params['action'])
+			action += np.random.binomial(1, self.args.random_eps, 1)[0] * (random_actions - action)
+			self.ModelsTrain()
+			return action.squeeze()
+
 
 	def Update(self):
 		for i in range(self.args.n_batch):
@@ -135,22 +150,19 @@ class Agent:
 			for cycle in range(self.args.n_cycles):
 				for _ in range(self.args.num_rollouts_per_mpi):
 					state = self.env.reset()
-					state = self.norm.normalize_state(state, training=True)
 					for t in range(self.env_params['max_timesteps']): 
-						action = self.Action(state, noise=True)
+						action = self.NoiseAction(state)
 						nextstate, reward, done, info = self.env.step(action)
-						nextstate = self.norm.normalize_state(nextstate, training=True)
 						assert not isinstance(reward, np.ndarray)
-						reward = self.norm.normalize_reward(reward, training=True)
 						self.buffer.StoreTransition(state, action, reward, nextstate, done)
 						state = nextstate
 						if done:
 							break
-					print("test")
 				self.Update()		
-			self.tensorboard.step = epoch
+			
 			avg_reward = self.Evaluate()
 			if MPI.COMM_WORLD.Get_rank() == 0:
+				self.tensorboard.step = epoch
 				print(f"Epoch {epoch} of total of {self.args.n_epochs +1} epochs, average reward is: {avg_reward}")
 				if epoch % 5 or epoch + 1 == self.args.n_epochs:
 					self.SaveModels(epoch)
@@ -158,18 +170,16 @@ class Agent:
 
 	
 	def Evaluate(self):
+		self.ModelsEval()
 		total_reward = []
 		episode_reward = 0
 		succes_rate = []
 		for episode in range(self.args.n_evaluate):
 			state = self.env.reset()
-			state = self.norm.normalize_state(state,training=False)
 			episode_reward = 0
 			for t in range(self.env_params['max_timesteps']): 
-				action = self.Action(state,noise=False)
+				action = self.GreedyAction(state)
 				nextstate, reward, done, info = self.env.step(action)
-				nextstate = self.norm.normalize_state(nextstate, training=False)
-				reward = self.norm.normalize_reward(reward, training=False)
 				episode_reward += reward
 				state = nextstate
 				if done or t + 1 == self.env_params['max_timesteps']:
@@ -184,9 +194,11 @@ class Agent:
 		global_min_reward = MPI.COMM_WORLD.allreduce(average_reward.item(), op=MPI.MIN)
 		if MPI.COMM_WORLD.Get_rank() == 0:
 			self.tensorboard.update_stats(reward_avg=global_avg_reward, reward_min=global_min_reward, reward_max=global_max_reward)
+		self.ModelsTrain()
 		return global_avg_reward
 
 	def record(self, epoch):
+		self.ModelsEval()
 		try:
 			if not os.path.exists("videos"):
 				os.mkdir('videos')
@@ -194,17 +206,15 @@ class Agent:
 			for _ in range(self.args.n_record):
 				done =False
 				state = self.env.reset()
-				state = self.norm.normalize_state(state, training=False)
 				while not done:
 					recorder.capture_frame()
-					action = self.Action(state, noise=None)
+					action = self.GreedyAction(state)
 					nextstate,reward,done,info = self.env.step(action)
-					nextstate = self.norm.normalize_state(nextstate, training=False)
-					reward = self.norm.normalize_reward(reward, training=False)
 					state = nextstate
 			recorder.close()
 		except Exception as e:
 			print(e)
+		self.ModelsTrain()
 
 	def SaveModels(self, ep):
 		torch.save(self.actor.state_dict(), os.path.join('models/', 'Actor.pt'))

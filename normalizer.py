@@ -28,9 +28,6 @@ class Normalizer:
         if training:
             import pdb; pdb.set_trace()
             self.obs_rms.update(np.array(observation))
-            # self.runn_mean_obs.mean = MPI.COMM_WORLD.allreduce(self.runn_mean_obs.mean, op=MPI.SUM) / MPI.COMM_WORLD.Get_size()
-            # self.runn_mean_obs.var = MPI.COMM_WORLD.allreduce(self.runn_mean_obs.var, op=MPI.SUM) / MPI.COMM_WORLD.Get_size()
-            # self.runn_mean_obs.count = MPI.COMM_WORLD.allreduce(self.runn_mean_obs.count, op=MPI.SUM)
         observation = np.clip((observation - self.obs_rms.mean) / np.sqrt(self.obs_rms.var +self.epsilon), -self.clip_obs, self.clip_obs)
         return observation
 
