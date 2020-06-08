@@ -1,9 +1,8 @@
 import numpy as np
 import tensorflow as tf
-#from running_mean_std import RunningMeanStd
-from mpi_running_mean_std import RunningMeanStd
+from running_mean_std import RunningMeanStd
+# from mpi_running_mean_std import RunningMeanStd
 import pdb
-from mpi4py import MPI
 import traceback
 
 class Normalizer:
@@ -26,7 +25,6 @@ class Normalizer:
 
         observation = obs
         if training:
-            import pdb; pdb.set_trace()
             self.obs_rms.update(np.array(observation))
         observation = np.clip((observation - self.obs_rms.mean) / np.sqrt(self.obs_rms.var +self.epsilon), -self.clip_obs, self.clip_obs)
         return observation
@@ -40,7 +38,7 @@ class Normalizer:
             r = np.clip(reward / np.sqrt(self.ret_rms.var + self.epsilon), -self.clip_rew, self.clip_rew)
         return r
 
-    
+
     def load(load_path, venv):
         """
         Loads a saved VecNormalize object.
