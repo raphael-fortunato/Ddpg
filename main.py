@@ -1,5 +1,9 @@
 import gym
 import os
+from mpi4py import MPI
+import np
+import torch
+import random
 from ddpg_agent import Agent
 from buffer import ReplayBuffer
 from models import Actor, Critic
@@ -24,6 +28,15 @@ if __name__ == '__main__':
         args = GetArgs()
         env = gym.make('Pendulum-v0')
         env_param = get_params(env)
-        device = 'cuda'
+
+
+        #setting seeds
+        env.seed(0 + MPI.COMM_WORLD.Get_rank())
+        np.random.seed(0 + MPI.COMM_WORLD.Get_rank())
+        torch.manual_seed(0 + MPI.COMM_WORLD.Get_rank())
+        random.seed(0 + MPI.COMM_WORLD.Get_rank())
+
+        device = 'cpu'
+        print(f"Process {MPI.COMM_WORLD.Get_rank()} of {MPI.COMM_WORLD.Get_size()}")
         agent = Agent(env, env_param,args, device)
         agent.Explore()

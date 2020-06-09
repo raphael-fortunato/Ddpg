@@ -4,3 +4,5 @@ logs/
 models/
 *.png
 Youtube-Code-Repository-master/
+.vimrc
+videos/

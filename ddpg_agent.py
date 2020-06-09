@@ -15,7 +15,8 @@ from CustomTensorBoard import ModifiedTensorBoard
 
 import time
 from copy import deepcopy
-
+from mpi4py import MPI
+from mpi_utils import sync_networks, sync_grads
 
 from normalizer import Normalizer
 from models import Actor, Critic
@@ -26,11 +27,11 @@ GlfwContext(offscreen=True)  # Create a window to init GLFW.
 
 
 class Agent:
-    def __init__(self,env, env_params, args,device, models=None, record_episodes=[0,.1,.25,.5,.75,1.]):
+    def __init__(self,env, env_params, args,device, models=None):
         self.env= env
         self.env_params = env_params
         self.args = args
-
+        self.device = device
 
         # networks
         if models == None:
@@ -41,6 +42,9 @@ class Agent:
         # target networks used to predict env actions with
         self.actor_target = Actor(self.env_params,).double()
         self.critic_target = Critic(self.env_params).double()
+
+        sync_networks(self.actor)
+        sync_networks(self.critic)
 
         self.actor_target.load_state_dict(self.actor.state_dict())
         self.critic_target.load_state_dict(self.critic.state_dict())
@@ -57,8 +61,8 @@ class Agent:
 
         self.normalize = Normalizer(env_params,self.args.gamma)
         self.buffer = ReplayBuffer(1_000_000, self.env_params)
-        self.tensorboard = ModifiedTensorBoard(log_dir = f"logs")
-        self.record_episodes = [int(eps * self.args.n_epochs) for eps in record_episodes]
+        if MPI.COMM_WORLD.Get_rank() == 0:
+            self.tensorboard = ModifiedTensorBoard(log_dir = f"logs")
 
     def ModelsEval(self):
         self.actor.eval()
@@ -75,14 +79,14 @@ class Agent:
     def GreedyAction(self, state):
         self.ModelsEval()
         with torch.no_grad():
-            state = torch.tensor(state, device='cuda',dtype=torch.double).unsqueeze(dim=0)
+            state = torch.tensor(state, device=self.device, dtype=torch.double).unsqueeze(dim=0)
             action = self.actor.forward(state).detach().cpu().numpy().squeeze()
         return action
 
     def NoiseAction(self, state):
         self.ModelsEval()
         with torch.no_grad():
-            state = torch.tensor(state, device='cuda',dtype=torch.double).unsqueeze(dim=0)
+            state = torch.tensor(state, device=self.device, dtype=torch.double).unsqueeze(dim=0)
             action = self.actor.forward(state).detach().cpu().numpy()
             action += self.args.noise_eps * self.env_params['max_action'] * np.random.randn(*action.shape)
             action = np.clip(action, -self.env_params['max_action'], self.env_params['max_action'])
@@ -99,7 +103,7 @@ class Agent:
             nextstate = torch.tensor(nextstate,dtype=torch.double)
             # d_batch = 1 - d_batch
 
-            if torch.cuda.is_available():
+            if self.device == 'cuda':
                 a_batch = a_batch.cuda()
                 r_batch = r_batch.cuda()
                 # d_batch = d_batch.cuda()
@@ -124,10 +128,12 @@ class Agent:
 
             self.actor_optim.zero_grad()
             actor_loss.backward()
+            sync_grads(self.actor)
             self.actor_optim.step()
 
             self.critic_optim.zero_grad()
             critic_loss.backward()
+            sync_grads(self.critic)
             self.critic_optim.step()
 
         self.SoftUpdateTarget(self.critic, self.critic_target)
@@ -135,6 +141,7 @@ class Agent:
 
     def Explore(self):
         for epoch in range(self.args.n_epochs +1):
+            start_time = time.process_time()
             for cycle in range(self.args.n_cycles):
                 for _ in range(self.args.num_rollouts_per_mpi):
                     state = self.env.reset()
@@ -147,11 +154,14 @@ class Agent:
                         state = nextstate
                     self.Update()
             avg_reward = self.Evaluate()
-            self.tensorboard.step = epoch
-            print(f"Epoch {epoch} of total of {self.args.n_epochs +1} epochs, average reward is: {avg_reward}")
-            if epoch % 5 or epoch + 1 == self.args.n_epochs:
-                self.SaveModels(epoch)
-                self.record(epoch)
+            if MPI.COMM_WORLD.Get_rank() == 0:
+                self.tensorboard.step = epoch
+                elapsed_time = time.process_time() - start_time
+                print(f"Epoch {epoch} of total of {self.args.n_epochs +1} epochs, average reward is: {avg_reward}.\
+                        Elapsedtime: {int(elapsed_time /60)} minutes {int(elapsed_time %60)} seconds")
+                if epoch % 5 or epoch + 1 == self.args.n_epochs:
+                    self.SaveModels(epoch)
+            self.record(epoch)
 
 
     def Evaluate(self):
@@ -174,15 +184,19 @@ class Agent:
         average_reward = sum(total_reward)/len(total_reward)
         min_reward = min(total_reward)
         max_reward = max(total_reward)
-        self.tensorboard.update_stats(reward_avg=average_reward, reward_min=min_reward, reward_max=max_reward)
-        return average_reward
+        global_avg_reward = MPI.COMM_WORLD.allreduce(average_reward.item(), op=MPI.SUM) / MPI.COMM_WORLD.Get_size()
+        global_max_reward = MPI.COMM_WORLD.allreduce(average_reward.item(), op=MPI.MAX)
+        global_min_reward = MPI.COMM_WORLD.allreduce(average_reward.item(), op=MPI.MIN)
+        if MPI.COMM_WORLD.Get_rank() == 0:
+            self.tensorboard.update_stats(reward_avg=global_avg_reward, reward_min=global_min_reward, reward_max=global_max_reward)
+        return global_avg_reward
 
     def record(self, epoch):
         self.ModelsEval()
         try:
             if not os.path.exists("videos"):
                 os.mkdir('videos')
-            recorder = VideoRecorder(self.env, path=f'videos/epoch-{epoch}.mp4')
+            recorder = VideoRecorder(self.env, path=f'videos/epoch-{epoch}-num-{MPI.COMM_WORLD.Get_rank()}.mp4')
             for _ in range(self.args.n_record):
                 done =False
                 state = self.env.reset()
