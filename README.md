@@ -1,6 +1,6 @@
 # Deep Deterministic Policy Gradient
 
-****STILL IN DEVELOPMENT****
+****IN DEVELOPMENT****
 Deep Deterministic Policy Gradient combined with Prioritized Experience Replay and Hindsight Experience Replay
 
 ****Status****
