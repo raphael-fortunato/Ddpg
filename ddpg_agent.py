@@ -90,7 +90,7 @@ class Agent:
             action = self.actor.forward(state).detach().cpu().numpy()
             action += self.args.noise_eps * self.env_params['max_action'] * np.random.randn(*action.shape)
             action = np.clip(action, -self.env_params['max_action'], self.env_params['max_action'])
-        return action
+        return action.squeeze()
 
     def Update(self):
         self.ModelsTrain()
