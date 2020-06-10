@@ -80,8 +80,8 @@ class Agent:
         self.ModelsEval()
         with torch.no_grad():
             state = torch.tensor(state, device=self.device, dtype=torch.double).unsqueeze(dim=0)
-            action = self.actor.forward(state).detach().cpu().numpy().squeeze()
-        return action
+            action = self.actor.forward(state).detach().cpu().numpy()
+        return action.squeeze()
 
     def NoiseAction(self, state):
         self.ModelsEval()
@@ -90,7 +90,7 @@ class Agent:
             action = self.actor.forward(state).detach().cpu().numpy()
             action += self.args.noise_eps * self.env_params['max_action'] * np.random.randn(*action.shape)
             action = np.clip(action, -self.env_params['max_action'], self.env_params['max_action'])
-        return action
+        return action.squeeze()
 
     def Update(self):
         self.ModelsTrain()
@@ -147,8 +147,7 @@ class Agent:
                     state = self.env.reset()
                     for t in range(self.env_params['max_timesteps']):
                         action = self.NoiseAction(state)
-                        nextstate, reward, done, info = self.env.step([action])
-                        nextstate = nextstate.squeeze()
+                        nextstate, reward, done, info = self.env.step(action)
                         reward = self.normalize.normalize_reward(reward)
                         self.buffer.StoreTransition(state, action, reward, nextstate, done)
                         state = nextstate
@@ -174,7 +173,7 @@ class Agent:
             episode_reward = 0
             for t in range(self.env_params['max_timesteps']):
                 action = self.GreedyAction(state)
-                nextstate, reward, done, info = self.env.step([action])
+                nextstate, reward, done, info = self.env.step(action)
                 episode_reward += reward
                 state = nextstate
                 if done or t + 1 == self.env_params['max_timesteps']:
@@ -203,7 +202,7 @@ class Agent:
                 while not done:
                     recorder.capture_frame()
                     action = self.GreedyAction(state)
-                    nextstate,reward,done,info = self.env.step([action])
+                    nextstate,reward,done,info = self.env.step(action)
                     state = nextstate
                 recorder.close()
         except Exception as e:

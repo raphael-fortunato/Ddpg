@@ -1,7 +1,7 @@
 import gym
 import os
 from mpi4py import MPI
-import np
+import numpy as np
 import torch
 import random
 from ddpg_agent import Agent
@@ -17,7 +17,7 @@ def get_params(env):
                         'action': env.action_space.shape[0],
                         'max_action': env.action_space.high[0],
                         }
-        params['max_timesteps'] = env._max_episode_steps
+        params['max_timesteps'] = 200
         return params
 
 if __name__ == '__main__':
@@ -26,7 +26,7 @@ if __name__ == '__main__':
         os.environ['MKL_NUM_THREADS'] = '1'
         os.environ['IN_MPI'] = '1'
         args = GetArgs()
-        env = gym.make('Pendulum-v0')
+        env = gym.make('BipedalWalker-v2')
         env_param = get_params(env)
 
 
