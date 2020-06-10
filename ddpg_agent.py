@@ -139,6 +139,7 @@ class Agent:
 
     def Explore(self):
         for epoch in range(self.args.n_epochs +1):
+            start_time = time.process_time()
             for cycle in range(self.args.n_cycles):
                 for _ in range(self.args.num_rollouts_per_mpi):
                     state = self.env.reset()
@@ -152,7 +153,9 @@ class Agent:
                     self.Update()
             avg_reward = self.Evaluate()
             self.tensorboard.step = epoch
-            print(f"Epoch {epoch} of total of {self.args.n_epochs +1} epochs, average reward is: {avg_reward}")
+            elapsed_time = time.process_time() - start_time
+            print(f"Epoch {epoch} of total of {self.args.n_epochs +1} epochs, average reward is: {avg_reward}\
+                    . Elapsedtime: {int(elapsed_time /60)} minutes {int(elapsed_time %60)} seconds")
             if epoch % 5 or epoch + 1 == self.args.n_epochs:
                 self.SaveModels(epoch)
                 self.record(epoch)
