@@ -1,5 +1,8 @@
 import gym
 import os
+import numpy as np
+import torch
+import random
 from ddpg_agent import Agent
 from buffer import ReplayBuffer
 from models import Actor, Critic
@@ -24,6 +27,12 @@ if __name__ == '__main__':
         args = GetArgs()
         env = gym.make('Pendulum-v0')
         env_param = get_params(env)
-        device = 'cuda'
-        agent = Agent(env, env_param,args, device)
+
+        #set seeds
+        np.random.seed(0)
+        torch.manual_seed(0)
+        random.seed(0)
+        env.seed(0)
+
+        agent = Agent(env, env_param,args)
         agent.Explore()

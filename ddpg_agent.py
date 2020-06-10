@@ -45,7 +45,7 @@ class Agent:
         self.actor_target.load_state_dict(self.actor.state_dict())
         self.critic_target.load_state_dict(self.critic.state_dict())
 
-        if(device == 'cuda'):
+        if self.args.cuda:
             self.actor.cuda()
             self.critic.cuda()
             self.actor_target.cuda()
@@ -75,14 +75,18 @@ class Agent:
     def GreedyAction(self, state):
         self.ModelsEval()
         with torch.no_grad():
-            state = torch.tensor(state, device='cuda',dtype=torch.double).unsqueeze(dim=0)
+            state = torch.tensor(state, dtype=torch.double).unsqueeze(dim=0)
+            if self.args.cuda:
+                state = state.cuda()
             action = self.actor.forward(state).detach().cpu().numpy().squeeze()
         return action
 
     def NoiseAction(self, state):
         self.ModelsEval()
         with torch.no_grad():
-            state = torch.tensor(state, device='cuda',dtype=torch.double).unsqueeze(dim=0)
+            state = torch.tensor(state, dtype=torch.double).unsqueeze(dim=0)
+            if self.args.cuda:
+                state = state.cuda()
             action = self.actor.forward(state).detach().cpu().numpy()
             action += self.args.noise_eps * self.env_params['max_action'] * np.random.randn(*action.shape)
             action = np.clip(action, -self.env_params['max_action'], self.env_params['max_action'])
@@ -99,7 +103,7 @@ class Agent:
             nextstate = torch.tensor(nextstate,dtype=torch.double)
             # d_batch = 1 - d_batch
 
-            if torch.cuda.is_available():
+            if self.args.cuda:
                 a_batch = a_batch.cuda()
                 r_batch = r_batch.cuda()
                 # d_batch = d_batch.cuda()
