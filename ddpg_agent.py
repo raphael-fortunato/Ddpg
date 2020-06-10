@@ -26,7 +26,7 @@ GlfwContext(offscreen=True)  # Create a window to init GLFW.
 
 
 class Agent:
-    def __init__(self,env, env_params, args,device, models=None, record_episodes=[0,.1,.25,.5,.75,1.]):
+    def __init__(self,env, env_params, args, models=None, record_episodes=[0,.1,.25,.5,.75,1.]):
         self.env= env
         self.env_params = env_params
         self.args = args
@@ -154,8 +154,8 @@ class Agent:
             avg_reward = self.Evaluate()
             self.tensorboard.step = epoch
             elapsed_time = time.process_time() - start_time
-            print(f"Epoch {epoch} of total of {self.args.n_epochs +1} epochs, average reward is: {avg_reward}\
-                    . Elapsedtime: {int(elapsed_time /60)} minutes {int(elapsed_time %60)} seconds")
+            print(f"Epoch {epoch} of total of {self.args.n_epochs +1} epochs, average reward is: {avg_reward}.\
+                    Elapsedtime: {int(elapsed_time /60)} minutes {int(elapsed_time %60)} seconds")
             if epoch % 5 or epoch + 1 == self.args.n_epochs:
                 self.SaveModels(epoch)
                 self.record(epoch)
